@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+import math
 
 import tensorflow as tf
 import tensorflow_hub as hub
@@ -22,6 +23,17 @@ def main():
 
         # 推論実行
         keypoints, scores = run_inference(movenet, frame)
+
+        # 身体の傾き角度を計算
+        angle = calculate_body_angle(keypoints, scores)
+        if angle is not None:
+            print(f"身体の傾き角度: {angle:.2f}度")
+
+            # 転倒の閾値を設定（例えば、45度以上を転倒とみなす）
+            FALL_ANGLE_THRESHOLD = 45
+            if angle > FALL_ANGLE_THRESHOLD:
+                print("転倒を検知しました！")
+                # ここでGPT APIの呼び出しや、他のアクションを実行できます
 
         # 画像レンダリング
         result_image = render(frame, keypoints, scores)
@@ -59,6 +71,50 @@ def run_inference(model, image):
     keypoints = keypoints.astype(int)
     
     return keypoints, scores
+
+def calculate_body_angle(keypoints, scores, threshold=KEYPOINT_THRESHOLD):
+    # 左肩、右肩、左腰、右腰のインデックス
+    left_shoulder = 5
+    right_shoulder = 6
+    left_hip = 11
+    right_hip = 12
+
+    # キーポイントのスコアが閾値以上であることを確認
+    required_keypoints = [left_shoulder, right_shoulder, left_hip, right_hip]
+    if any(scores[idx] < threshold for idx in required_keypoints):
+        return None  # 信頼できるデータがない場合はNoneを返す
+
+    # 左右の肩と腰の平均座標を計算
+    shoulder_center = (
+        (keypoints[left_shoulder][0] + keypoints[right_shoulder][0]) / 2,
+        (keypoints[left_shoulder][1] + keypoints[right_shoulder][1]) / 2
+    )
+    hip_center = (
+        (keypoints[left_hip][0] + keypoints[right_hip][0]) / 2,
+        (keypoints[left_hip][1] + keypoints[right_hip][1]) / 2
+    )
+
+    # 身体の中心線のベクトルを計算
+    vector = (
+        hip_center[0] - shoulder_center[0],
+        hip_center[1] - shoulder_center[1]
+    )
+
+    # 垂直線のベクトル (画面上では縦方向がY軸)
+    vertical_vector = (0, 1)
+
+    # ベクトルの内積と大きさを使用して角度を計算
+    dot_product = vector[0]*vertical_vector[0] + vector[1]*vertical_vector[1]
+    magnitude_vector = math.sqrt(vector[0]**2 + vector[1]**2)
+    magnitude_vertical = 1  # 垂直ベクトルの大きさ
+
+    if magnitude_vector == 0:
+        return None  # ベクトルの大きさが0の場合は角度を計算できない
+
+    cos_theta = dot_product / (magnitude_vector * magnitude_vertical)
+    angle = math.degrees(math.acos(cos_theta))
+
+    return angle
 
 def render(image, keypoints, scores):
     render = image.copy()
